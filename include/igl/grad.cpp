@@ -13,7 +13,7 @@
 #include "per_face_normals.h"
 #include "volume.h"
 #include "doublearea.h"
-
+#include "triangle_triangle_adjacency.h"
 namespace igl {
 
 namespace {
@@ -166,7 +166,9 @@ IGL_INLINE void grad_tri(
       // Abstract equilateral triangle v1=(0,0), v2=(h,0), v3=(h/2, (sqrt(3)/2)*h)
 
       // get h (by the area of the triangle)
-      double h = sqrt( (dblA)/sin(igl::PI / 3.0)); // (h^2*sin(60))/2. = Area => h = sqrt(2*Area/sin_60)
+      // double h = sqrt( (dblA)/sin(igl::PI / 3.0)); // (h^2*sin(60))/2. = Area => h = sqrt(2*Area/sin_60)
+      double h = 1.0; // modified by leyi
+      dblA = sqrt(3) / 2.0; // added by leyi
 
       Eigen::Matrix<typename DerivedV::Scalar, 3, 1> v1,v2,v3;
       v1 << 0,0,0;
