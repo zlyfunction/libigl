@@ -11,7 +11,7 @@
 
 #include <Eigen/Core>
 #include <Eigen/Sparse>
-
+#include <vector>
 namespace igl {
   // GRAD
   // G = grad(V,F)
@@ -34,11 +34,21 @@ namespace igl {
   // 90 degrees
   //
   template <typename DerivedV, typename DerivedF>
+  void grad_plastic(
+    const Eigen::MatrixBase<DerivedV> &V,
+    const Eigen::MatrixBase<DerivedF> &F,
+    const std::vector<double> &trg,
+    Eigen::SparseMatrix<typename DerivedV::Scalar> &G
+  );
+  
+  template <typename DerivedV, typename DerivedF>
   IGL_INLINE void grad(
     const Eigen::MatrixBase<DerivedV>&V,
     const Eigen::MatrixBase<DerivedF>&F,
     Eigen::SparseMatrix<typename DerivedV::Scalar> &G,
     bool uniform = false);
+
+  
 }
 #ifndef IGL_STATIC_LIBRARY
 #  include "grad.cpp"
