@@ -211,8 +211,30 @@ IGL_INLINE void grad_tri(
 }
 
 } // anonymous namespace
+
+} // namespace igl
+
 template <typename DerivedV, typename DerivedF>
-void grad_plastic(
+IGL_INLINE void igl::grad(
+  const Eigen::MatrixBase<DerivedV>&V,
+  const Eigen::MatrixBase<DerivedF>&F,
+  Eigen::SparseMatrix<typename DerivedV::Scalar> &G,
+  bool uniform)
+{
+  assert(F.cols() == 3 || F.cols() == 4);
+  switch(F.cols())
+  {
+    case 3:
+      return grad_tri(V,F,G,uniform);
+    case 4:
+      return grad_tet(V,F,G,uniform);
+    default:
+      assert(false);
+  }
+}
+
+template <typename DerivedV, typename DerivedF>
+void igl::grad_plastic(
     const Eigen::MatrixBase<DerivedV> &V,
     const Eigen::MatrixBase<DerivedF> &F,
     const std::vector<double> &trg,
@@ -300,27 +322,6 @@ void grad_plastic(
   }
   G.setFromTriplets(Gijv.begin(), Gijv.end());
 }
-} // namespace igl
-
-template <typename DerivedV, typename DerivedF>
-IGL_INLINE void igl::grad(
-  const Eigen::MatrixBase<DerivedV>&V,
-  const Eigen::MatrixBase<DerivedF>&F,
-  Eigen::SparseMatrix<typename DerivedV::Scalar> &G,
-  bool uniform)
-{
-  assert(F.cols() == 3 || F.cols() == 4);
-  switch(F.cols())
-  {
-    case 3:
-      return grad_tri(V,F,G,uniform);
-    case 4:
-      return grad_tet(V,F,G,uniform);
-    default:
-      assert(false);
-  }
-}
-
 
 
 // #ifdef IGL_STATIC_LIBRARY
