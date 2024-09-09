@@ -1,24 +1,17 @@
 // This file is part of libigl, a simple c++ geometry processing library.
 //
 // Copyright (C) 2018 Zhongshi Jiang <jiangzs@nyu.edu>
-// 
+//
 // This Source Code Form is subject to the terms of the Mozilla Public License
 // v. 2.0. If a copy of the MPL was not distributed with this file, You can
 // obtain one at http://mozilla.org/MPL/2.0/.
 
 #include "scaf.h"
-#include "triangulate.h"
-
-#include <Eigen/Dense>
-#include <Eigen/IterativeLinearSolvers>
-#include <Eigen/Sparse>
-#include <Eigen/SparseCholesky>
-#include <Eigen/SparseQR>
+#include "../IGL_ASSERT.h"
 #include "../PI.h"
 #include "../Timer.h"
 #include "../boundary_loop.h"
 #include "../cat.h"
-#include "../IGL_ASSERT.h"
 #include "../doublearea.h"
 #include "../flip_avoiding_line_search.h"
 #include "../flipped_triangles.h"
@@ -26,24 +19,27 @@
 #include "../harmonic.h"
 #include "../local_basis.h"
 #include "../map_vertices_to_circle.h"
+#include "../mapping_energy_with_jacobians.h"
 #include "../polar_svd.h"
 #include "../slice.h"
 #include "../slice_into.h"
 #include "../slim.h"
-#include "../mapping_energy_with_jacobians.h"
+#include "triangulate.h"
+#include <Eigen/Dense>
+#include <Eigen/IterativeLinearSolvers>
+#include <Eigen/Sparse>
+#include <Eigen/SparseCholesky>
+#include <Eigen/SparseQR>
+#include <iostream>
 
-#include <map>
 #include <algorithm>
+#include <map>
 #include <set>
 #include <vector>
-namespace igl
-{
-namespace triangle
-{
-namespace scaf
-{
-IGL_INLINE void update_scaffold(igl::triangle::SCAFData &s)
-{
+namespace igl {
+namespace triangle {
+namespace scaf {
+IGL_INLINE void update_scaffold(igl::triangle::SCAFData &s) {
   s.mv_num = s.m_V.rows();
   s.mf_num = s.m_T.rows();
 
@@ -56,13 +52,11 @@ IGL_INLINE void update_scaffold(igl::triangle::SCAFData &s)
   s.s_M = Eigen::VectorXd::Constant(s.sf_num, s.scaffold_factor);
 }
 
-IGL_INLINE void adjusted_grad(Eigen::MatrixXd &V,
-                   Eigen::MatrixXi &F,
-                   double area_threshold,
-                   Eigen::SparseMatrix<double> &Dx,
-                   Eigen::SparseMatrix<double> &Dy,
-                   Eigen::SparseMatrix<double> &Dz)
-{
+IGL_INLINE void adjusted_grad(Eigen::MatrixXd &V, Eigen::MatrixXi &F,
+                              double area_threshold,
+                              Eigen::SparseMatrix<double> &Dx,
+                              Eigen::SparseMatrix<double> &Dy,
+                              Eigen::SparseMatrix<double> &Dz) {
   Eigen::VectorXd M;
   igl::doublearea(V, F, M);
   std::vector<int> degen;
@@ -82,23 +76,20 @@ IGL_INLINE void adjusted_grad(Eigen::MatrixXd &V,
   double cos60 = std::cos(igl::PI / 3);
   double deno = std::sqrt(sin60 * area_threshold);
   Eigen::MatrixXd standard_grad(3, 3);
-  standard_grad << -sin60 / deno, sin60 / deno, 0,
-      -cos60 / deno, -cos60 / deno, 1 / deno,
-      0, 0, 0;
+  standard_grad << -sin60 / deno, sin60 / deno, 0, -cos60 / deno, -cos60 / deno,
+      1 / deno, 0, 0, 0;
 
   for (auto k : degen)
-    for (int j = 0; j < 3; j++)
-    {
+    for (int j = 0; j < 3; j++) {
       Dx.coeffRef(k, F(k, j)) = standard_grad(0, j);
       Dy.coeffRef(k, F(k, j)) = standard_grad(1, j);
       Dz.coeffRef(k, F(k, j)) = standard_grad(2, j);
     }
 }
 
-IGL_INLINE void compute_scaffold_gradient_matrix(SCAFData &s,
-                                      Eigen::SparseMatrix<double> &D1,
-                                      Eigen::SparseMatrix<double> &D2)
-{
+IGL_INLINE void
+compute_scaffold_gradient_matrix(SCAFData &s, Eigen::SparseMatrix<double> &D1,
+                                 Eigen::SparseMatrix<double> &D2) {
   using namespace Eigen;
   Eigen::SparseMatrix<double> G;
   MatrixXi F_s = s.s_T;
@@ -108,21 +99,20 @@ IGL_INLINE void compute_scaffold_gradient_matrix(SCAFData &s,
 
   double min_bnd_edge_len = INFINITY;
   int acc_bnd = 0;
-  for (int i = 0; i < s.bnd_sizes.size(); i++)
-  {
+  for (int i = 0; i < s.bnd_sizes.size(); i++) {
     int current_size = s.bnd_sizes[i];
 
-    for (int e = acc_bnd; e < acc_bnd + current_size - 1; e++)
-    {
-      min_bnd_edge_len = (std::min)(min_bnd_edge_len,
-                                    (s.w_uv.row(s.internal_bnd(e)) -
-                                     s.w_uv.row(s.internal_bnd(e + 1)))
-                                        .squaredNorm());
+    for (int e = acc_bnd; e < acc_bnd + current_size - 1; e++) {
+      min_bnd_edge_len =
+          (std::min)(min_bnd_edge_len, (s.w_uv.row(s.internal_bnd(e)) -
+                                        s.w_uv.row(s.internal_bnd(e + 1)))
+                                           .squaredNorm());
     }
-    min_bnd_edge_len = (std::min)(min_bnd_edge_len,
-                                  (s.w_uv.row(s.internal_bnd(acc_bnd)) -
-                                   s.w_uv.row(s.internal_bnd(acc_bnd + current_size - 1)))
-                                      .squaredNorm());
+    min_bnd_edge_len =
+        (std::min)(min_bnd_edge_len,
+                   (s.w_uv.row(s.internal_bnd(acc_bnd)) -
+                    s.w_uv.row(s.internal_bnd(acc_bnd + current_size - 1)))
+                       .squaredNorm());
     acc_bnd += current_size;
   }
 
@@ -138,8 +128,7 @@ IGL_INLINE void compute_scaffold_gradient_matrix(SCAFData &s,
        F2.col(2).asDiagonal() * Dz;
 }
 
-IGL_INLINE void mesh_improve(igl::triangle::SCAFData &s)
-{
+IGL_INLINE void mesh_improve(igl::triangle::SCAFData &s) {
   using namespace Eigen;
   MatrixXd m_uv = s.w_uv.topRows(s.mv_num);
   MatrixXd V_bnd;
@@ -149,8 +138,7 @@ IGL_INLINE void mesh_improve(igl::triangle::SCAFData &s)
     V_bnd.row(i) = m_uv.row(s.internal_bnd(i));
   }
 
-  if (s.rect_frame_V.size() == 0)
-  {
+  if (s.rect_frame_V.size() == 0) {
     Matrix2d ob; // = rect_corners;
     {
       VectorXd uv_max = m_uv.colwise().maxCoeff();
@@ -166,23 +154,25 @@ IGL_INLINE void mesh_improve(igl::triangle::SCAFData &s)
     int frame_points = 5;
 
     s.rect_frame_V.resize(4 * frame_points, 2);
-    for (int i = 0; i < frame_points; i++)
-    {
+    for (int i = 0; i < frame_points; i++) {
       // 0,0;0,1
-      s.rect_frame_V.row(i) << ob(0, 0), ob(0, 1) + i * rect_len(1) / frame_points;
+      s.rect_frame_V.row(i) << ob(0, 0),
+          ob(0, 1) + i * rect_len(1) / frame_points;
       // 0,0;1,1
       s.rect_frame_V.row(i + frame_points)
           << ob(0, 0) + i * rect_len(0) / frame_points,
           ob(1, 1);
       // 1,0;1,1
-      s.rect_frame_V.row(i + 2 * frame_points) << ob(1, 0), ob(1, 1) - i * rect_len(1) / frame_points;
+      s.rect_frame_V.row(i + 2 * frame_points) << ob(1, 0),
+          ob(1, 1) - i * rect_len(1) / frame_points;
       // 1,0;0,1
       s.rect_frame_V.row(i + 3 * frame_points)
           << ob(1, 0) - i * rect_len(0) / frame_points,
           ob(0, 1);
       // 0,0;0,1
     }
-    s.frame_ids = Eigen::VectorXi::LinSpaced(s.rect_frame_V.rows(), s.mv_num, s.mv_num + s.rect_frame_V.rows());
+    s.frame_ids = Eigen::VectorXi::LinSpaced(s.rect_frame_V.rows(), s.mv_num,
+                                             s.mv_num + s.rect_frame_V.rows());
   }
 
   // Concatenate Vert and Edge
@@ -193,8 +183,7 @@ IGL_INLINE void mesh_improve(igl::triangle::SCAFData &s)
   for (int i = 0; i < E.rows(); i++)
     E.row(i) << i, i + 1;
   int acc_bs = 0;
-  for (auto bs : s.bnd_sizes)
-  {
+  for (auto bs : s.bnd_sizes) {
     E(acc_bs + bs - 1, 1) = acc_bs;
     acc_bs += bs;
   }
@@ -205,8 +194,7 @@ IGL_INLINE void mesh_improve(igl::triangle::SCAFData &s)
   {
     int hole_f = 0;
     int hole_i = 0;
-    for (auto cs : s.component_sizes)
-    {
+    for (auto cs : s.component_sizes) {
       for (int i = 0; i < 3; i++)
         H.row(hole_i) += m_uv.row(s.m_T(hole_f, i)); // redoing step 2
       hole_f += cs;
@@ -216,12 +204,12 @@ IGL_INLINE void mesh_improve(igl::triangle::SCAFData &s)
   H /= 3.;
 
   MatrixXd uv2;
-  igl::triangle::triangulate(V, E, H, std::basic_string<char>("qYYQ"), uv2, s.s_T);
+  igl::triangle::triangulate(V, E, H, std::basic_string<char>("qYYQ"), uv2,
+                             s.s_T);
   auto bnd_n = s.internal_bnd.size();
 
   for (auto i = 0; i < s.s_T.rows(); i++)
-    for (auto j = 0; j < s.s_T.cols(); j++)
-    {
+    for (auto j = 0; j < s.s_T.cols(); j++) {
       auto &x = s.s_T(i, j);
       if (x < bnd_n)
         x = s.internal_bnd(x);
@@ -246,11 +234,11 @@ IGL_INLINE void mesh_improve(igl::triangle::SCAFData &s)
   s.W_s.resize(s.Dx_s.rows(), s.dim * s.dim);
 }
 
-IGL_INLINE void add_new_patch(igl::triangle::SCAFData &s, const Eigen::MatrixXd &V_ref,
-                   const Eigen::MatrixXi &F_ref,
-                   const Eigen::RowVectorXd &/*center*/,
-                   const Eigen::MatrixXd &uv_init)
-{
+IGL_INLINE void add_new_patch(igl::triangle::SCAFData &s,
+                              const Eigen::MatrixXd &V_ref,
+                              const Eigen::MatrixXi &F_ref,
+                              const Eigen::RowVectorXd & /*center*/,
+                              const Eigen::MatrixXd &uv_init) {
   using namespace std;
   using namespace Eigen;
 
@@ -273,10 +261,10 @@ IGL_INLINE void add_new_patch(igl::triangle::SCAFData &s, const Eigen::MatrixXd 
   s.m_M.conservativeResize(s.mf_num + M.size());
   s.m_M.bottomRows(M.size()) = M / 2;
 
-  for (auto cur_bnd : all_bnds)
-  {
+  for (auto cur_bnd : all_bnds) {
     s.internal_bnd.conservativeResize(s.internal_bnd.size() + cur_bnd.size());
-    s.internal_bnd.bottomRows(cur_bnd.size()) = Map<ArrayXi>(cur_bnd.data(), cur_bnd.size()) + s.mv_num;
+    s.internal_bnd.bottomRows(cur_bnd.size()) =
+        Map<ArrayXi>(cur_bnd.data(), cur_bnd.size()) + s.mv_num;
     s.bnd_sizes.push_back(cur_bnd.size());
   }
 
@@ -293,19 +281,70 @@ IGL_INLINE void add_new_patch(igl::triangle::SCAFData &s, const Eigen::MatrixXd 
   mesh_improve(s);
 }
 
-IGL_INLINE void compute_jacobians(SCAFData &s, const Eigen::MatrixXd &V_new, bool whole)
-{
-  auto comp_J2 = [](const Eigen::MatrixXd &uv,
-                    const Eigen::SparseMatrix<double> &Dx,
-                    const Eigen::SparseMatrix<double> &Dy,
-                    Eigen::MatrixXd &Ji) {
-    // Ji=[D1*u,D2*u,D1*v,D2*v];
-    Ji.resize(Dx.rows(), 4);
-    Ji.col(0) = Dx * uv.col(0);
-    Ji.col(1) = Dy * uv.col(0);
-    Ji.col(2) = Dx * uv.col(1);
-    Ji.col(3) = Dy * uv.col(1);
-  };
+// TODO: used for joint_flattening
+// for here, we use V_joint_before, since m_v is not that import here
+IGL_INLINE void add_new_patch_joint(igl::triangle::SCAFData &s,
+                                    const Eigen::MatrixXd &V_ref,
+                                    const Eigen::MatrixXi &F_joint,
+                                    const Eigen::MatrixXi &F_joint_before,
+                                    const Eigen::MatrixXi &F_joint_after,
+                                    const Eigen::RowVectorXd & /*center*/,
+                                    const Eigen::MatrixXd &uv_init) {
+  using namespace std;
+  using namespace Eigen;
+
+  assert(uv_init.rows() != 0);
+  Eigen::VectorXd M;
+  igl::doublearea(V_ref, F_joint, M);
+  s.mesh_measure += M.sum() / 2;
+
+  Eigen::VectorXi bnd;
+  Eigen::MatrixXd bnd_uv;
+
+  std::vector<std::vector<int>> all_bnds;
+  // here we use F_joint_before to get the boundary loop
+  igl::boundary_loop(F_joint_before, all_bnds);
+
+  s.component_sizes.push_back(F_joint.rows());
+
+  MatrixXd m_uv = s.w_uv.topRows(s.mv_num);
+  igl::cat(1, m_uv, uv_init, s.w_uv);
+
+  s.m_M.conservativeResize(s.mf_num + M.size());
+  s.m_M.bottomRows(M.size()) = M / 2;
+
+  for (auto cur_bnd : all_bnds) {
+    s.internal_bnd.conservativeResize(s.internal_bnd.size() + cur_bnd.size());
+    s.internal_bnd.bottomRows(cur_bnd.size()) =
+        Map<ArrayXi>(cur_bnd.data(), cur_bnd.size()) + s.mv_num;
+    s.bnd_sizes.push_back(cur_bnd.size());
+  }
+
+  s.m_T.conservativeResize(s.mf_num + F_joint.rows(), 3);
+  s.m_T.bottomRows(F_joint.rows()) = F_joint.array() + s.mv_num;
+  s.mf_num += F_joint.rows();
+
+  s.m_V.conservativeResize(s.mv_num + V_ref.rows(), 3);
+  s.m_V.bottomRows(V_ref.rows()) = V_ref;
+  s.mv_num += V_ref.rows();
+
+  s.rect_frame_V = MatrixXd();
+
+  mesh_improve(s);
+}
+
+IGL_INLINE void compute_jacobians(SCAFData &s, const Eigen::MatrixXd &V_new,
+                                  bool whole) {
+  auto comp_J2 =
+      [](const Eigen::MatrixXd &uv, const Eigen::SparseMatrix<double> &Dx,
+         const Eigen::SparseMatrix<double> &Dy, Eigen::MatrixXd &Ji) {
+        // Ji=[D1*u,D2*u,D1*v,D2*v];
+        Ji.resize(Dx.rows(), 4);
+        Ji.col(0) = Dx * uv.col(0);
+        Ji.col(1) = Dy * uv.col(0);
+        Ji.col(2) = Dx * uv.col(1);
+        Ji.col(3) = Dy * uv.col(1);
+      };
 
   Eigen::MatrixXd m_V_new = V_new.topRows(s.mv_num);
   comp_J2(m_V_new, s.Dx_m, s.Dy_m, s.Ji_m);
@@ -313,18 +352,17 @@ IGL_INLINE void compute_jacobians(SCAFData &s, const Eigen::MatrixXd &V_new, boo
     comp_J2(V_new, s.Dx_s, s.Dy_s, s.Ji_s);
 }
 
-IGL_INLINE double compute_energy_from_jacobians(const Eigen::MatrixXd &Ji,
-                                     const Eigen::VectorXd &areas,
-                                     igl::MappingEnergyType energy_type)
-{
+IGL_INLINE double
+compute_energy_from_jacobians(const Eigen::MatrixXd &Ji,
+                              const Eigen::VectorXd &areas,
+                              igl::MappingEnergyType energy_type) {
   double energy = 0;
   if (energy_type == igl::MappingEnergyType::SYMMETRIC_DIRICHLET)
-    energy = -4; // comply with paper description
+    energy = -4 * areas.sum(); // comply with paper description
   return energy + igl::mapping_energy_with_jacobians(Ji, areas, energy_type, 0);
 }
 
-IGL_INLINE double compute_soft_constraint_energy(const SCAFData &s)
-{
+IGL_INLINE double compute_soft_constraint_energy(const SCAFData &s) {
   double e = 0;
   for (auto const &x : s.soft_cons)
     e += s.soft_const_p * (x.second - s.w_uv.row(x.first)).squaredNorm();
@@ -332,8 +370,8 @@ IGL_INLINE double compute_soft_constraint_energy(const SCAFData &s)
   return e;
 }
 
-IGL_INLINE double compute_energy(SCAFData &s, const Eigen::MatrixXd &w_uv, bool whole)
-{
+IGL_INLINE double compute_energy(SCAFData &s, const Eigen::MatrixXd &w_uv,
+                                 bool whole) {
   if (w_uv.rows() != s.v_num)
     assert(!whole);
   compute_jacobians(s, w_uv, whole);
@@ -346,11 +384,10 @@ IGL_INLINE double compute_energy(SCAFData &s, const Eigen::MatrixXd &w_uv, bool 
 }
 
 IGL_INLINE void buildAm(const Eigen::VectorXd &sqrt_M,
-             const Eigen::SparseMatrix<double> &Dx,
-             const Eigen::SparseMatrix<double> &Dy,
-             const Eigen::MatrixXd &W,
-             Eigen::SparseMatrix<double> &Am)
-{
+                        const Eigen::SparseMatrix<double> &Dx,
+                        const Eigen::SparseMatrix<double> &Dy,
+                        const Eigen::MatrixXd &W,
+                        Eigen::SparseMatrix<double> &Am) {
   std::vector<Eigen::Triplet<double>> IJV;
   Eigen::SparseMatrix<double> Dz;
 
@@ -363,16 +400,13 @@ IGL_INLINE void buildAm(const Eigen::VectorXd &sqrt_M,
 }
 
 IGL_INLINE void buildRhs(const Eigen::VectorXd &sqrt_M,
-              const Eigen::MatrixXd &W,
-              const Eigen::MatrixXd &Ri,
-              Eigen::VectorXd &f_rhs)
-{
+                         const Eigen::MatrixXd &W, const Eigen::MatrixXd &Ri,
+                         Eigen::VectorXd &f_rhs) {
   const int dim = (W.cols() == 4) ? 2 : 3;
   const int f_n = W.rows();
   f_rhs.resize(dim * dim * f_n);
 
-  for (int i = 0; i < f_n; i++)
-  {
+  for (int i = 0; i < f_n; i++) {
     auto sqrt_area = sqrt_M(i);
     f_rhs(i + 0 * f_n) = sqrt_area * (W(i, 0) * Ri(i, 0) + W(i, 1) * Ri(i, 1));
     f_rhs(i + 1 * f_n) = sqrt_area * (W(i, 0) * Ri(i, 2) + W(i, 1) * Ri(i, 3));
@@ -381,11 +415,11 @@ IGL_INLINE void buildRhs(const Eigen::VectorXd &sqrt_M,
   }
 }
 
-IGL_INLINE void get_complement(const Eigen::VectorXi &bnd_ids, int v_n, Eigen::ArrayXi &unknown_ids)
-{ // get the complement of bnd_ids.
+IGL_INLINE void
+get_complement(const Eigen::VectorXi &bnd_ids, int v_n,
+               Eigen::ArrayXi &unknown_ids) { // get the complement of bnd_ids.
   int assign = 0, i = 0;
-  for (int get = 0; i < v_n && get < bnd_ids.size(); i++)
-  {
+  for (int get = 0; i < v_n && get < bnd_ids.size(); i++) {
     if (bnd_ids(get) == i)
       get++;
     else
@@ -396,8 +430,9 @@ IGL_INLINE void get_complement(const Eigen::VectorXi &bnd_ids, int v_n, Eigen::A
   assert(assign + bnd_ids.size() == v_n);
 }
 
-IGL_INLINE void build_surface_linear_system(const SCAFData &s, Eigen::SparseMatrix<double> &L, Eigen::VectorXd &rhs)
-{
+IGL_INLINE void build_surface_linear_system(const SCAFData &s,
+                                            Eigen::SparseMatrix<double> &L,
+                                            Eigen::VectorXd &rhs) {
   using namespace Eigen;
   using namespace std;
 
@@ -416,8 +451,7 @@ IGL_INLINE void build_surface_linear_system(const SCAFData &s, Eigen::SparseMatr
 
   const VectorXi &bnd_ids = s.fixed_ids;
   auto bnd_n = bnd_ids.size();
-  if (bnd_n == 0)
-  {
+  if (bnd_n == 0) {
 
     Eigen::SparseMatrix<double> At = A.transpose();
     At.makeCompressed();
@@ -430,17 +464,14 @@ IGL_INLINE void build_surface_linear_system(const SCAFData &s, Eigen::SparseMatr
     Eigen::VectorXd frhs;
     buildRhs(sqrtM, s.W_m, s.Ri_m, frhs);
     rhs = At * frhs;
-  }
-  else
-  {
+  } else {
     MatrixXd bnd_pos = s.w_uv(bnd_ids, Eigen::all);
 
     ArrayXi known_ids(bnd_ids.size() * dim);
     ArrayXi unknown_ids((v_n - bnd_ids.rows()) * dim);
     get_complement(bnd_ids, v_n, unknown_ids);
     VectorXd known_pos(bnd_ids.size() * dim);
-    for (int d = 0; d < dim; d++)
-    {
+    for (int d = 0; d < dim; d++) {
       auto n_b = bnd_ids.rows();
       known_ids.segment(d * n_b, n_b) = bnd_ids.array() + d * v_n;
       known_pos.segment(d * n_b, n_b) = bnd_pos.col(d);
@@ -464,12 +495,10 @@ IGL_INLINE void build_surface_linear_system(const SCAFData &s, Eigen::SparseMatr
   }
 
   // add soft constraints.
-  for (auto const &x : s.soft_cons)
-  {
+  for (auto const &x : s.soft_cons) {
     int v_idx = x.first;
 
-    for (int d = 0; d < dim; d++)
-    {
+    for (int d = 0; d < dim; d++) {
       rhs(d * (v_n) + v_idx) += s.soft_const_p * x.second(d); // rhs
       L.coeffRef(d * v_n + v_idx,
                  d * v_n + v_idx) += s.soft_const_p; // diagonal
@@ -477,8 +506,9 @@ IGL_INLINE void build_surface_linear_system(const SCAFData &s, Eigen::SparseMatr
   }
 }
 
-IGL_INLINE void build_scaffold_linear_system(const SCAFData &s, Eigen::SparseMatrix<double> &L, Eigen::VectorXd &rhs)
-{
+IGL_INLINE void build_scaffold_linear_system(const SCAFData &s,
+                                             Eigen::SparseMatrix<double> &L,
+                                             Eigen::VectorXd &rhs) {
   using namespace Eigen;
 
   const int f_n = s.W_s.rows();
@@ -502,8 +532,7 @@ IGL_INLINE void build_scaffold_linear_system(const SCAFData &s, Eigen::SparseMat
   get_complement(bnd_ids, v_n, unknown_ids);
 
   VectorXd known_pos(bnd_ids.size() * dim);
-  for (int d = 0; d < dim; d++)
-  {
+  for (int d = 0; d < dim; d++) {
     auto n_b = bnd_ids.rows();
     known_ids.segment(d * n_b, n_b) = bnd_ids.array() + d * v_n;
     known_pos.segment(d * n_b, n_b) = bnd_pos.col(d);
@@ -528,8 +557,9 @@ IGL_INLINE void build_scaffold_linear_system(const SCAFData &s, Eigen::SparseMat
   rhs = Aut * (frhs - Ae * known_pos);
 }
 
-IGL_INLINE void build_weighted_arap_system(SCAFData &s, Eigen::SparseMatrix<double> &L, Eigen::VectorXd &rhs)
-{
+IGL_INLINE void build_weighted_arap_system(SCAFData &s,
+                                           Eigen::SparseMatrix<double> &L,
+                                           Eigen::VectorXd &rhs) {
   // fixed frame solving:
   // x_e as the fixed frame, x_u for unknowns (mesh + unknown scaffold)
   // min ||(A_u*x_u + A_e*x_e) - b||^2
@@ -552,8 +582,7 @@ IGL_INLINE void build_weighted_arap_system(SCAFData &s, Eigen::SparseMatrix<doub
   L.makeCompressed();
 }
 
-IGL_INLINE void solve_weighted_arap(SCAFData &s, Eigen::MatrixXd &uv)
-{
+IGL_INLINE void solve_weighted_arap(SCAFData &s, Eigen::MatrixXd &uv) {
   using namespace Eigen;
   using namespace std;
   int dim = s.dim;
@@ -573,8 +602,7 @@ IGL_INLINE void solve_weighted_arap(SCAFData &s, Eigen::MatrixXd &uv)
   get_complement(bnd_ids, v_n, unknown_ids);
 
   VectorXd known_pos(bnd_ids.size() * dim);
-  for (int d = 0; d < dim; d++)
-  {
+  for (int d = 0; d < dim; d++) {
     auto n_b = bnd_ids.rows();
     known_ids.segment(d * n_b, n_b) = bnd_ids.array() + d * v_n;
     known_pos.segment(d * n_b, n_b) = bnd_pos.col(d);
@@ -586,7 +614,9 @@ IGL_INLINE void solve_weighted_arap(SCAFData &s, Eigen::MatrixXd &uv)
   Eigen::VectorXd rhs;
   build_weighted_arap_system(s, L, rhs);
 
-  Eigen::VectorXd unknown_Uc((v_n - s.frame_ids.size() - s.fixed_ids.size()) * dim), Uc(dim * v_n);
+  Eigen::VectorXd unknown_Uc((v_n - s.frame_ids.size() - s.fixed_ids.size()) *
+                             dim),
+      Uc(dim * v_n);
 
   SimplicialLDLT<Eigen::SparseMatrix<double>> solver;
   unknown_Uc = solver.compute(L).solve(rhs);
@@ -596,41 +626,40 @@ IGL_INLINE void solve_weighted_arap(SCAFData &s, Eigen::MatrixXd &uv)
   uv = Map<Matrix<double, -1, -1, Eigen::ColMajor>>(Uc.data(), v_n, dim);
 }
 
-IGL_INLINE double perform_iteration(SCAFData &s)
-{
+IGL_INLINE double perform_iteration(SCAFData &s) {
   Eigen::MatrixXd V_out = s.w_uv;
   compute_jacobians(s, V_out, true);
-  igl::slim_update_weights_and_closest_rotations_with_jacobians(s.Ji_m, s.slim_energy, 0, s.W_m, s.Ri_m);
-  igl::slim_update_weights_and_closest_rotations_with_jacobians(s.Ji_s, s.scaf_energy, 0, s.W_s, s.Ri_s);
+  igl::slim_update_weights_and_closest_rotations_with_jacobians(
+      s.Ji_m, s.slim_energy, 0, s.W_m, s.Ri_m);
+  igl::slim_update_weights_and_closest_rotations_with_jacobians(
+      s.Ji_s, s.scaf_energy, 0, s.W_s, s.Ri_s);
   solve_weighted_arap(s, V_out);
-  std::function<double(Eigen::MatrixXd&)> whole_E = [&s](Eigen::MatrixXd &uv) { return compute_energy(s, uv, true); };
+  std::function<double(Eigen::MatrixXd &)> whole_E = [&s](Eigen::MatrixXd &uv) {
+    return compute_energy(s, uv, true);
+  };
 
   Eigen::MatrixXi w_T;
   if (s.m_T.cols() == s.s_T.cols())
     igl::cat(1, s.m_T, s.s_T, w_T);
   else
     w_T = s.s_T;
-  return igl::flip_avoiding_line_search( w_T, s.w_uv, V_out, whole_E, -1) /
-    s.mesh_measure;
+  return igl::flip_avoiding_line_search(w_T, s.w_uv, V_out, whole_E, -1) /
+         s.mesh_measure;
 }
 
-}
-}
-}
+} // namespace scaf
+} // namespace triangle
+} // namespace igl
 
 IGL_INLINE void igl::triangle::scaf_precompute(
-    const Eigen::MatrixXd &V,
-    const Eigen::MatrixXi &F,
-    const Eigen::MatrixXd &V_init,
-    igl::triangle::SCAFData &data,
-    igl::MappingEnergyType slim_energy,
-    Eigen::VectorXi &b,
-    Eigen::MatrixXd &bc,
-    double soft_p)
-{
+    const Eigen::MatrixXd &V, const Eigen::MatrixXi &F,
+    const Eigen::MatrixXd &V_init, igl::triangle::SCAFData &data,
+    igl::MappingEnergyType slim_energy, Eigen::VectorXi &b, Eigen::MatrixXd &bc,
+    double soft_p) {
   Eigen::MatrixXd CN;
   Eigen::MatrixXi FN;
-  igl::triangle::scaf::add_new_patch(data, V, F, Eigen::RowVector2d(0, 0), V_init);
+  igl::triangle::scaf::add_new_patch(data, V, F, Eigen::RowVector2d(0, 0),
+                                     V_init);
   data.soft_const_p = soft_p;
   for (int i = 0; i < b.rows(); i++)
     data.soft_cons[b(i)] = bc.row(i);
@@ -638,20 +667,19 @@ IGL_INLINE void igl::triangle::scaf_precompute(
 
   auto &s = data;
 
-  if (!data.has_pre_calc)
-  {
+  if (!data.has_pre_calc) {
     int dim = s.dim;
     Eigen::MatrixXd F1, F2, F3;
     igl::local_basis(s.m_V, s.m_T, F1, F2, F3);
-    auto face_proj = [](Eigen::MatrixXd& F){
-      std::vector<Eigen::Triplet<double> >IJV;
+    auto face_proj = [](Eigen::MatrixXd &F) {
+      std::vector<Eigen::Triplet<double>> IJV;
       int f_num = F.rows();
-      for(int i=0; i<F.rows(); i++) {
-        IJV.push_back(Eigen::Triplet<double>(i, i, F(i,0)));
-        IJV.push_back(Eigen::Triplet<double>(i, i+f_num, F(i,1)));
-        IJV.push_back(Eigen::Triplet<double>(i, i+2*f_num, F(i,2)));
+      for (int i = 0; i < F.rows(); i++) {
+        IJV.push_back(Eigen::Triplet<double>(i, i, F(i, 0)));
+        IJV.push_back(Eigen::Triplet<double>(i, i + f_num, F(i, 1)));
+        IJV.push_back(Eigen::Triplet<double>(i, i + 2 * f_num, F(i, 2)));
       }
-      Eigen::SparseMatrix<double> P(f_num, 3*f_num);
+      Eigen::SparseMatrix<double> P(f_num, 3 * f_num);
       P.setFromTriplets(IJV.begin(), IJV.end());
       return P;
     };
@@ -678,15 +706,94 @@ IGL_INLINE void igl::triangle::scaf_precompute(
   }
 }
 
-IGL_INLINE Eigen::MatrixXd igl::triangle::scaf_solve(igl::triangle::SCAFData &s, int iter_num)
-{
+IGL_INLINE void igl::triangle::scaf_precompute_joint(
+    const Eigen::MatrixXd &V_joint_before, const Eigen::MatrixXd &V_joint_after,
+    const Eigen::MatrixXi &F_joint, const Eigen::MatrixXi &F_joint_before,
+    const Eigen::MatrixXi &F_joint_after, const Eigen::MatrixXd &uv_init,
+    triangle::SCAFData &data, MappingEnergyType slim_energy, Eigen::VectorXi &b,
+    Eigen::MatrixXd &bc, double soft_p) {
+  Eigen::MatrixXd CN;
+  Eigen::MatrixXi FN;
+
+  // TODO: this is a new function
+  igl::triangle::scaf::add_new_patch_joint(data, V_joint_before, F_joint,
+                                           F_joint_before, F_joint_after,
+                                           Eigen::RowVector2d(0, 0), uv_init);
+
+  // energy part is the same
+  data.soft_const_p = soft_p;
+  for (int i = 0; i < b.rows(); i++)
+    data.soft_cons[b(i)] = bc.row(i);
+  data.slim_energy = slim_energy;
+
+  auto &s = data;
+
+  if (!data.has_pre_calc) {
+    int dim = s.dim;
+    Eigen::MatrixXd F1_before, F2_before, F3_before;
+    Eigen::MatrixXd F1_after, F2_after, F3_after;
+
+    igl::local_basis(V_joint_before, F_joint_before, F1_before, F2_before,
+                     F3_before);
+    igl::local_basis(V_joint_after, F_joint_after, F1_after, F2_after,
+                     F3_after);
+
+    auto face_proj = [](Eigen::MatrixXd &F) {
+      std::vector<Eigen::Triplet<double>> IJV;
+      int f_num = F.rows();
+      for (int i = 0; i < F.rows(); i++) {
+        IJV.push_back(Eigen::Triplet<double>(i, i, F(i, 0)));
+        IJV.push_back(Eigen::Triplet<double>(i, i + f_num, F(i, 1)));
+        IJV.push_back(Eigen::Triplet<double>(i, i + 2 * f_num, F(i, 2)));
+      }
+      Eigen::SparseMatrix<double> P(f_num, 3 * f_num);
+      P.setFromTriplets(IJV.begin(), IJV.end());
+      return P;
+    };
+
+    Eigen::SparseMatrix<double> G_before;
+    Eigen::SparseMatrix<double> G_after;
+    igl::grad(V_joint_before, F_joint_before, G_before);
+    igl::grad(V_joint_after, F_joint_after, G_after);
+    // igl::grad(s.m_V, s.m_T, G);
+    Eigen::SparseMatrix<double> Dx_m_before = face_proj(F1_before) * G_before;
+    Eigen::SparseMatrix<double> Dy_m_before = face_proj(F2_before) * G_before;
+    Eigen::SparseMatrix<double> Dx_m_after = face_proj(F1_after) * G_after;
+    Eigen::SparseMatrix<double> Dy_m_after = face_proj(F2_after) * G_after;
+
+    // s.Dx_m = [Dx_m_before; Dx_m_after];
+    // s.Dy_m = [Dy_m_before; Dy_m_after];
+    igl::cat(1, Dx_m_before, Dx_m_after, s.Dx_m);
+    igl::cat(1, Dy_m_before, Dy_m_after, s.Dy_m);
+
+    igl::triangle::scaf::compute_scaffold_gradient_matrix(s, s.Dx_s, s.Dy_s);
+
+    s.Dx_m.makeCompressed();
+    s.Dy_m.makeCompressed();
+    s.Ri_m = Eigen::MatrixXd::Zero(s.Dx_m.rows(), dim * dim);
+    s.Ji_m.resize(s.Dx_m.rows(), dim * dim);
+    s.W_m.resize(s.Dx_m.rows(), dim * dim);
+
+    s.Dx_s.makeCompressed();
+    s.Dy_s.makeCompressed();
+    s.Ri_s = Eigen::MatrixXd::Zero(s.Dx_s.rows(), dim * dim);
+    s.Ji_s.resize(s.Dx_s.rows(), dim * dim);
+    s.W_s.resize(s.Dx_s.rows(), dim * dim);
+
+    data.has_pre_calc = true;
+  }
+}
+
+IGL_INLINE Eigen::MatrixXd igl::triangle::scaf_solve(igl::triangle::SCAFData &s,
+                                                     int iter_num) {
   using namespace std;
   using namespace Eigen;
-  s.energy = igl::triangle::scaf::compute_energy(s, s.w_uv, false) / s.mesh_measure;
+  s.energy =
+      igl::triangle::scaf::compute_energy(s, s.w_uv, false) / s.mesh_measure;
 
-  for (int it = 0; it < iter_num; it++)
-  {
-    s.total_energy = igl::triangle::scaf::compute_energy(s, s.w_uv, true) / s.mesh_measure;
+  for (int it = 0; it < iter_num; it++) {
+    s.total_energy =
+        igl::triangle::scaf::compute_energy(s, s.w_uv, true) / s.mesh_measure;
     s.rect_frame_V = Eigen::MatrixXd();
     igl::triangle::scaf::mesh_improve(s);
 
@@ -703,23 +810,28 @@ IGL_INLINE Eigen::MatrixXd igl::triangle::scaf_solve(igl::triangle::SCAFData &s,
   return s.w_uv.topRows(s.mv_num);
 }
 
-IGL_INLINE void igl::triangle::scaf_system(igl::triangle::SCAFData &s, Eigen::SparseMatrix<double> &L, Eigen::VectorXd &rhs)
-{
-    s.energy = igl::triangle::scaf::compute_energy(s, s.w_uv, false) / s.mesh_measure;
+IGL_INLINE void igl::triangle::scaf_system(igl::triangle::SCAFData &s,
+                                           Eigen::SparseMatrix<double> &L,
+                                           Eigen::VectorXd &rhs) {
+  s.energy =
+      igl::triangle::scaf::compute_energy(s, s.w_uv, false) / s.mesh_measure;
 
-    s.total_energy = igl::triangle::scaf::compute_energy(s, s.w_uv, true) / s.mesh_measure;
-    s.rect_frame_V = Eigen::MatrixXd();
-    igl::triangle::scaf::mesh_improve(s);
+  s.total_energy =
+      igl::triangle::scaf::compute_energy(s, s.w_uv, true) / s.mesh_measure;
+  s.rect_frame_V = Eigen::MatrixXd();
+  igl::triangle::scaf::mesh_improve(s);
 
-    double new_weight = s.mesh_measure * s.energy / (s.sf_num * 100);
-    s.scaffold_factor = new_weight;
-    igl::triangle::scaf::update_scaffold(s);
+  double new_weight = s.mesh_measure * s.energy / (s.sf_num * 100);
+  s.scaffold_factor = new_weight;
+  igl::triangle::scaf::update_scaffold(s);
 
-    igl::triangle::scaf::compute_jacobians(s, s.w_uv, true);
-    igl::slim_update_weights_and_closest_rotations_with_jacobians(s.Ji_m, s.slim_energy, 0, s.W_m, s.Ri_m);
-    igl::slim_update_weights_and_closest_rotations_with_jacobians(s.Ji_s, s.scaf_energy, 0, s.W_s, s.Ri_s);
+  igl::triangle::scaf::compute_jacobians(s, s.w_uv, true);
+  igl::slim_update_weights_and_closest_rotations_with_jacobians(
+      s.Ji_m, s.slim_energy, 0, s.W_m, s.Ri_m);
+  igl::slim_update_weights_and_closest_rotations_with_jacobians(
+      s.Ji_s, s.scaf_energy, 0, s.W_s, s.Ri_s);
 
-    igl::triangle::scaf::build_weighted_arap_system(s, L, rhs);
+  igl::triangle::scaf::build_weighted_arap_system(s, L, rhs);
 }
 
 #ifdef IGL_STATIC_LIBRARY
