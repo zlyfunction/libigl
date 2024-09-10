@@ -196,9 +196,34 @@ void get_joint_mesh(int case_id) {
     F_joint.bottomRows(F_joint_after.rows()) = F_joint_after;
 
   } // case 1
-  else {
-    throw std::runtime_error("Case not implemented yet!");
-  }
+  else if (case_id == 2) {
+
+    bool do_3_colinear_case = true;
+    // TODO: not sure about this but seems 3 colinear case is more common
+    std::vector<int> local_vid_after_to_before_map(v_id_map_after.size(), -1);
+
+    get_local_vid_map(local_vid_after_to_before_map, vi_before, vj_before,
+                      vi_after);
+
+    // TODO: implement this
+    // TODO: 3 colinear method or 4 colinear method?
+    // TODO: May need a way to do hard constraint on this, but try soft with
+    // high p first
+    if (do_3_colinear_case) {
+
+      // for connector case there will be no more vertices than before case
+      int N_v_joint = V_before.rows();
+
+      // build V_joint_before, and V_joint_after
+      V_joint_before = V_before;
+      V_joint_after = V_joint_before;
+      // we need to decide which vertex to keep
+
+      // TODO: implement this
+    } else {
+      std::runtime_error("4-Colinear-Method is Not implemented yet");
+    }
+  } // case 2
 }
 
 int main(int argc, char *argv[]) {
@@ -206,7 +231,8 @@ int main(int argc, char *argv[]) {
 
   // Load before and after mesh
   std::string mesh_folder_path = "/Users/leyi/Developer/wmtk_main/build/"
-                                 "operation_log_test1/";
+                                 "operation_log_test_2d_circle/";
+  //  "operation_log_test1/";
   int operation_id = 10;
 
   if (argc > 1) {
