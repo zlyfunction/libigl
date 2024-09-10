@@ -42,7 +42,7 @@ void read_mesh(const std::string &mesh_path, int operation_number) {
   // read "boundary case:" line
   std::getline(v_id_map_file, line);
 
-  // read "is_bd_v0" 和 "is_bd_v1"
+  // read "is_bd_v0" and "is_bd_v1"
   std::getline(v_id_map_file, line);
   std::istringstream bd_iss(line);
   bd_iss >> is_bd_v0 >> is_bd_v1;
@@ -85,38 +85,46 @@ void read_mesh(const std::string &mesh_path, int operation_number) {
   }
 }
 
+void get_local_vid_map(std::vector<int> &local_vid_after_to_before_map,
+                       int &vi_before, int &vj_before, int &vi_after) {
+  vi_after = 0;
+
+  local_vid_after_to_before_map.resize(v_id_map_after.size(), -1);
+  for (int i = 1; i < v_id_map_after.size(); i++) {
+    auto it = std::find(v_id_map_before.begin(), v_id_map_before.end(),
+                        v_id_map_after[i]);
+    if (it == v_id_map_before.end()) {
+      std::runtime_error("Error: vertex not found in v_id_map_before");
+    }
+    local_vid_after_to_before_map[i] =
+        std::distance(v_id_map_before.begin(), it);
+  }
+  vi_before = 0;
+  vj_before = -1;
+  for (int i = 0; i < v_id_map_before.size(); i++) {
+    if (std::find(v_id_map_after.begin(), v_id_map_after.end(),
+                  v_id_map_before[i]) == v_id_map_after.end()) {
+      vj_before = i;
+      break;
+    }
+  }
+
+  std::cout << "vj_before = " << vj_before << std::endl;
+  if (vj_before == -1 || vj_before == vi_before) {
+    throw std::runtime_error("Cannot find the joint vertex!");
+  }
+}
+
 void get_joint_mesh(int case_id) {
   // input is_bd_v0, is_bd_v1
   // case 0, interior case
   int vi_before, vj_before, vi_after;
+
   if (case_id == 0) {
-    vi_after = 0;
     std::vector<int> local_vid_after_to_before_map(v_id_map_after.size(), -1);
-    for (int i = 1; i < v_id_map_after.size(); i++) {
-      auto it = std::find(v_id_map_before.begin(), v_id_map_before.end(),
-                          v_id_map_after[i]);
-      if (it == v_id_map_before.end()) {
-        std::runtime_error("Error: vertex not found in v_id_map_before");
-      }
-      local_vid_after_to_before_map[i] =
-          std::distance(v_id_map_before.begin(), it);
-    }
 
-    vi_before = 0;
-    vj_before = -1;
-
-    for (int i = 0; i < v_id_map_before.size(); i++) {
-      if (std::find(v_id_map_after.begin(), v_id_map_after.end(),
-                    v_id_map_before[i]) == v_id_map_after.end()) {
-        vj_before = i;
-        break;
-      }
-    }
-
-    std::cout << "vj_before = " << vj_before << std::endl;
-    if (vj_before == -1 || vj_before == vi_before) {
-      throw std::runtime_error("Cannot find the joint vertex!");
-    }
+    get_local_vid_map(local_vid_after_to_before_map, vi_before, vj_before,
+                      vi_after);
 
     // for collapse operation there is one more vertex in the after mesh
     int N_v_joint = V_before.rows() + 1;
@@ -149,6 +157,45 @@ void get_joint_mesh(int case_id) {
     F_joint.bottomRows(F_joint_after.rows()) = F_joint_after;
 
   } // case 0
+  else if (case_id == 1) {
+    std::vector<int> local_vid_after_to_before_map(v_id_map_after.size(), -1);
+
+    get_local_vid_map(local_vid_after_to_before_map, vi_before, vj_before,
+                      vi_after);
+
+    // for connector case there will be no more vertices than before case
+    int N_v_joint = V_before.rows();
+
+    // build V_joint_before, and V_joint_after
+    V_joint_before = V_before;
+    V_joint_after = V_joint_before;
+    // which vertex is on the boundary
+    // note that vj is the one to be kept
+    int v_bd = is_bd_v0 ? vj_before : vi_before;
+    V_joint_after.row(v_bd) = V_after.row(vi_after);
+
+    // joint the two meshes
+    // get F_joint,(first after, then before)
+    F_joint_before = F_before;
+    F_joint_after.resize(F_after.rows(), F_after.cols());
+    // build F_joint_after
+    {
+      local_vid_after_to_before_map[vi_after] =
+          v_bd; // Note this line is different from case 0
+      for (int i = 0; i < F_joint_after.rows(); i++) {
+        for (int j = 0; j < F_joint_after.cols(); j++) {
+          F_joint_after(i, j) = local_vid_after_to_before_map[F_after(i, j)];
+        }
+      }
+    }
+
+    // build F_joint = [F_joint_before; F_joint_after]
+    F_joint.conservativeResize(F_joint_after.rows() + F_joint_before.rows(),
+                               F_joint_after.cols());
+    F_joint.topRows(F_joint_before.rows()) = F_joint_before;
+    F_joint.bottomRows(F_joint_after.rows()) = F_joint_after;
+
+  } // case 1
   else {
     throw std::runtime_error("Case not implemented yet!");
   }
@@ -161,6 +208,10 @@ int main(int argc, char *argv[]) {
   std::string mesh_folder_path = "/Users/leyi/Developer/wmtk_main/build/"
                                  "operation_log_test1/";
   int operation_id = 10;
+
+  if (argc > 1) {
+    operation_id = std::stoi(argv[1]);
+  }
   read_mesh(mesh_folder_path, operation_id);
 
   // get case id, 0 for interior case, 2 for boundary case, 1 for connector
