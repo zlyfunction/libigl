@@ -416,6 +416,7 @@ int main(int argc, char *argv[]) {
   igl::harmonic(V_joint_before, F_joint, bnd, bnd_uv, 1, uv_init);
 
   // debug display 1
+  /*
   {
     auto key_down_debug = [&](igl::opengl::glfw::Viewer &viewer,
                               unsigned char key, int modifier) {
@@ -452,6 +453,7 @@ int main(int argc, char *argv[]) {
     viewer.callback_key_down = key_down_debug;
     viewer.launch();
   }
+  */
 
   // TODO: need modification here on this? for hard constraint
   igl::triangle::scaf_precompute_joint(
@@ -504,17 +506,36 @@ int main(int argc, char *argv[]) {
             (F_joint_after.array() + scaf_data.w_uv.rows());
 
         viewer.data().set_mesh(uv_all, F_all);
+        viewer.data().set_colors(Eigen::RowVector3d(230, 220, 170) / 255.0);
         viewer.core().align_camera_center(uv_init, F_joint_before);
         break;
       }
       case 2: {
         viewer.data().clear();
         Eigen::MatrixXi F_w_before, F_w_after;
+        Eigen::MatrixXd C;
         igl::cat(1, F_joint_before, scaf_data.s_T, F_w_before);
         igl::cat(1, F_joint_after, scaf_data.s_T, F_w_after);
+        C.resize(F_w_before.rows() + F_w_after.rows(), 3);
+        for (int i = 0; i < F_joint_before.rows(); i++) {
+          C.row(i) = Eigen::RowVector3d(230, 220, 170) / 255.0;
+        }
+        for (int i = 0; i < scaf_data.s_T.rows(); i++) {
+          C.row(i + F_joint_before.rows()) =
+              Eigen::RowVector3d(210, 150, 150) / 255.0;
+        }
+        for (int i = 0; i < F_joint_after.rows(); i++) {
+          C.row(i + F_w_before.rows()) =
+              Eigen::RowVector3d(230, 220, 170) / 255.0;
+        }
+        for (int i = 0; i < scaf_data.s_T.rows(); i++) {
+          C.row(i + F_w_before.rows() + F_joint_after.rows()) =
+              Eigen::RowVector3d(210, 150, 150) / 255.0;
+        }
         F_all.resize(F_w_before.rows() + F_w_after.rows(), F_w_before.cols());
         F_all << F_w_before, (F_w_after.array() + scaf_data.w_uv.rows());
         viewer.data().set_mesh(uv_all, F_all);
+        viewer.data().set_colors(C);
         viewer.core().align_camera_center(uv_init, F_joint_before);
 
         break;
@@ -522,6 +543,7 @@ int main(int argc, char *argv[]) {
       case 3: {
         viewer.data().clear();
         viewer.data().set_mesh(scaf_data.w_uv, F_joint_before);
+        viewer.data().set_colors(Eigen::RowVector3d(230, 220, 170) / 255.0);
         viewer.core().align_camera_center(uv_init, F_joint_before);
 
         break;
@@ -529,6 +551,7 @@ int main(int argc, char *argv[]) {
       case 4: {
         viewer.data().clear();
         viewer.data().set_mesh(scaf_data.w_uv, F_joint_after);
+        viewer.data().set_colors(Eigen::RowVector3d(230, 220, 170) / 255.0);
         viewer.core().align_camera_center(uv_init, F_joint_before);
         break;
       }
@@ -539,6 +562,7 @@ int main(int argc, char *argv[]) {
 
     igl::opengl::glfw::Viewer viewer;
     viewer.data().set_mesh(scaf_data.w_uv, F_joint_before);
+    viewer.data().set_colors(Eigen::RowVector3d(230, 220, 170) / 255.0);
     viewer.callback_key_down = key_down_debug;
     viewer.launch();
   }
