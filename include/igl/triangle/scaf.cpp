@@ -643,6 +643,13 @@ IGL_INLINE double perform_iteration(SCAFData &s) {
     igl::cat(1, s.m_T, s.s_T, w_T);
   else
     w_T = s.s_T;
+
+  // add hard constraints
+  for (int i = 0; i < s.hard_cons.size(); i++) {
+    V_out(s.hard_cons[i].first, s.hard_cons[i].second) =
+        s.w_uv(s.hard_cons[i].first, s.hard_cons[i].second);
+  }
+
   return igl::flip_avoiding_line_search(w_T, s.w_uv, V_out, whole_E, -1) /
          s.mesh_measure;
 }
@@ -711,7 +718,8 @@ IGL_INLINE void igl::triangle::scaf_precompute_joint(
     const Eigen::MatrixXi &F_joint, const Eigen::MatrixXi &F_joint_before,
     const Eigen::MatrixXi &F_joint_after, const Eigen::MatrixXd &uv_init,
     triangle::SCAFData &data, MappingEnergyType slim_energy, Eigen::VectorXi &b,
-    Eigen::MatrixXd &bc, double soft_p) {
+    Eigen::MatrixXd &bc, double soft_p,
+    const std::vector<std::pair<int, int>> &hard_cons) {
   Eigen::MatrixXd CN;
   Eigen::MatrixXi FN;
 
@@ -720,6 +728,7 @@ IGL_INLINE void igl::triangle::scaf_precompute_joint(
                                            F_joint_before, F_joint_after,
                                            Eigen::RowVector2d(0, 0), uv_init);
 
+  data.hard_cons = hard_cons;
   // energy part is the same
   data.soft_const_p = soft_p;
   for (int i = 0; i < b.rows(); i++)

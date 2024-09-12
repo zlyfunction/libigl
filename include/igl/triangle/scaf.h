@@ -61,6 +61,8 @@ struct SCAFData {
   Eigen::VectorXi frame_ids;
   Eigen::VectorXi fixed_ids;
 
+  std::vector<std::pair<int, int>> hard_cons;
+
   std::map<int, Eigen::RowVectorXd> soft_cons;
   double soft_const_p = 1e4;
 
@@ -104,7 +106,8 @@ IGL_INLINE void scaf_precompute_joint(
     const Eigen::MatrixXi &F_joint, const Eigen::MatrixXi &F_joint_before,
     const Eigen::MatrixXi &F_joint_after, const Eigen::MatrixXd &uv_init,
     triangle::SCAFData &data, MappingEnergyType slim_energy, Eigen::VectorXi &b,
-    Eigen::MatrixXd &bc, double soft_p);
+    Eigen::MatrixXd &bc, double soft_p,
+    const std::vector<std::pair<int, int>> &hard_cons);
 
 /// Run iter_num iterations of SCAF, with precomputed data
 /// @param[in] data  precomputed data

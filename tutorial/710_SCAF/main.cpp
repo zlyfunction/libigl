@@ -17,11 +17,18 @@
 Eigen::MatrixXd V_after, V_before, V_joint_before, V_joint_after;
 Eigen::MatrixXi F_after, F_before, F_joint, F_joint_before, F_joint_after;
 
-igl::Timer timer;
-igl::triangle::SCAFData scaf_data;
-
 bool is_bd_v0 = false;
 bool is_bd_v1 = false;
+
+// Soft Constraints
+Eigen::VectorXi b_soft;
+Eigen::MatrixXd bc_soft;
+// Hard Constraints
+std::vector<std::pair<int, int>> b_hard;
+
+igl::triangle::SCAFData scaf_data;
+
+igl::Timer timer;
 
 int show_option = 1;
 
@@ -207,9 +214,69 @@ void get_joint_mesh(int case_id) {
 
     // TODO: implement this
     // TODO: 3 colinear method or 4 colinear method?
-    // TODO: May need a way to do hard constraint on this, but try soft with
-    // high p first
     if (do_3_colinear_case) {
+      // we need to decide which vertex to keep
+      int v_to_keep;
+      {
+        Eigen::VectorXi bd_loop_before;
+        igl::boundary_loop(F_before, bd_loop_before);
+
+        int i_idx = std::distance(
+            bd_loop_before.begin(),
+            std::find(bd_loop_before.begin(), bd_loop_before.end(), vi_before));
+        int j_idx = std::distance(
+            bd_loop_before.begin(),
+            std::find(bd_loop_before.begin(), bd_loop_before.end(), vj_before));
+        int offset = 1;
+        if (bd_loop_before[i_idx + offset] == vj_before) {
+          offset = -1;
+        }
+        // DEBUG CHECK
+        if (bd_loop_before[(i_idx + bd_loop_before.size() - offset) %
+                           bd_loop_before.size()] != vj_before) {
+          std::runtime_error(
+              "Something wrong with the boundary loop in 3-colinear method");
+        }
+        // vp, vi, vj, vq in order
+        int v_p = bd_loop_before[(i_idx + bd_loop_before.size() + offset) %
+                                 bd_loop_before.size()];
+        int v_q = bd_loop_before[(j_idx + bd_loop_before.size() - offset) %
+                                 bd_loop_before.size()];
+
+        auto in_same_triangle = [&](int v0, int v2, int v3) {
+          for (int i = 0; i < F_before.rows(); i++) {
+            if ((F_before(i, 0) == v0 || F_before(i, 1) == v0 ||
+                 F_before(i, 2) == v0) &&
+                (F_before(i, 0) == v2 || F_before(i, 1) == v2 ||
+                 F_before(i, 2) == v2) &&
+                (F_before(i, 0) == v3 || F_before(i, 1) == v3 ||
+                 F_before(i, 2) == v3)) {
+              return true;
+            }
+          }
+          return false;
+        };
+
+        b_soft.resize(3);
+
+        if (in_same_triangle(vi_before, vj_before, v_q)) {
+          v_to_keep = vj_before;
+          // keep vj means vp, vi, vj colinear
+          b_soft << v_p, vi_before, vj_before;
+          b_hard.resize(3);
+          b_hard[0] = std::make_pair(v_p, 0);
+          b_hard[1] = std::make_pair(vi_before, 0);
+          b_hard[2] = std::make_pair(vj_before, 0);
+        } else {
+          v_to_keep = vi_before;
+          // keep vi means vp, vi, vq colinear
+          b_soft << vi_before, vj_before, v_q;
+          b_hard.resize(3);
+          b_hard[0] = std::make_pair(vi_before, 0);
+          b_hard[1] = std::make_pair(vj_before, 0);
+          b_hard[2] = std::make_pair(v_q, 0);
+        }
+      }
 
       // for connector case there will be no more vertices than before case
       int N_v_joint = V_before.rows();
@@ -217,9 +284,29 @@ void get_joint_mesh(int case_id) {
       // build V_joint_before, and V_joint_after
       V_joint_before = V_before;
       V_joint_after = V_joint_before;
-      // we need to decide which vertex to keep
+      V_joint_after.row(v_to_keep) = V_after.row(vi_after);
 
-      // TODO: implement this
+      // joint the two meshes
+      // get F_joint,(first after, then before)
+      F_joint_before = F_before;
+      F_joint_after.resize(F_after.rows(), F_after.cols());
+      // build F_joint_after
+      {
+        local_vid_after_to_before_map[vi_after] =
+            v_to_keep; // Note this line is different from case 0
+        for (int i = 0; i < F_joint_after.rows(); i++) {
+          for (int j = 0; j < F_joint_after.cols(); j++) {
+            F_joint_after(i, j) = local_vid_after_to_before_map[F_after(i, j)];
+          }
+        }
+      }
+
+      // build F_joint = [F_joint_before; F_joint_after]
+      F_joint.conservativeResize(F_joint_after.rows() + F_joint_before.rows(),
+                                 F_joint_after.cols());
+      F_joint.topRows(F_joint_before.rows()) = F_joint_before;
+      F_joint.bottomRows(F_joint_after.rows()) = F_joint_after;
+
     } else {
       std::runtime_error("4-Colinear-Method is Not implemented yet");
     }
@@ -305,6 +392,26 @@ int main(int argc, char *argv[]) {
   igl::map_vertices_to_circle(V_joint_before, bnd, bnd_uv);
   bnd_uv *= sqrt(M_before.sum() / (2 * igl::PI));
 
+  if (case_id == 2) {
+    std::cout << "Case 2: force it to be colinear\n";
+    bc_soft.resize(b_soft.size(), 2);
+    double fixed_value = 0;
+    bool find = false;
+    for (int i = 0; i < bnd.size(); i++) {
+      for (int j = 0; j < b_soft.size(); j++)
+        if (bnd[i] == b_soft[j]) {
+          if (find) {
+            bnd_uv(i, 0) = fixed_value;
+            bc_soft.row(j) = bnd_uv.row(i);
+          } else {
+            find = true;
+            fixed_value = bnd_uv(i, 0);
+            bc_soft.row(j) = bnd_uv.row(i);
+          }
+        }
+    }
+  }
+
   // get uv_init
   igl::harmonic(V_joint_before, F_joint, bnd, bnd_uv, 1, uv_init);
 
@@ -346,14 +453,11 @@ int main(int argc, char *argv[]) {
     viewer.launch();
   }
 
-  Eigen::VectorXi b;
-  Eigen::MatrixXd bc;
-
-  // TODO: need modification here on this
+  // TODO: need modification here on this? for hard constraint
   igl::triangle::scaf_precompute_joint(
       V_joint_before, V_joint_after, F_joint, F_joint_before, F_joint_after,
-      uv_init, scaf_data, igl::MappingEnergyType::SYMMETRIC_DIRICHLET, b, bc,
-      0);
+      uv_init, scaf_data, igl::MappingEnergyType::SYMMETRIC_DIRICHLET, b_soft,
+      bc_soft, 0, b_hard);
 
   // debug display 2
   {
