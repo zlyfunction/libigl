@@ -206,77 +206,77 @@ void get_joint_mesh(int case_id) {
   else if (case_id == 2) {
 
     bool do_3_colinear_case = true;
-    // TODO: not sure about this but seems 3 colinear case is more common
     std::vector<int> local_vid_after_to_before_map(v_id_map_after.size(), -1);
 
     get_local_vid_map(local_vid_after_to_before_map, vi_before, vj_before,
                       vi_after);
 
-    // TODO: implement this
-    // TODO: 3 colinear method or 4 colinear method?
-    if (do_3_colinear_case) {
-      // we need to decide which vertex to keep
-      int v_to_keep;
-      {
-        Eigen::VectorXi bd_loop_before;
-        igl::boundary_loop(F_before, bd_loop_before);
+    // we need to decide which vertex to keep
+    int v_to_keep;
+    {
+      Eigen::VectorXi bd_loop_before;
+      igl::boundary_loop(F_before, bd_loop_before);
 
-        int i_idx = std::distance(
-            bd_loop_before.begin(),
-            std::find(bd_loop_before.begin(), bd_loop_before.end(), vi_before));
-        int j_idx = std::distance(
-            bd_loop_before.begin(),
-            std::find(bd_loop_before.begin(), bd_loop_before.end(), vj_before));
-        int offset = 1;
-        if (bd_loop_before[i_idx + offset] == vj_before) {
-          offset = -1;
-        }
-        // DEBUG CHECK
-        if (bd_loop_before[(i_idx + bd_loop_before.size() - offset) %
-                           bd_loop_before.size()] != vj_before) {
-          std::runtime_error(
-              "Something wrong with the boundary loop in 3-colinear method");
-        }
-        // vp, vi, vj, vq in order
-        int v_p = bd_loop_before[(i_idx + bd_loop_before.size() + offset) %
-                                 bd_loop_before.size()];
-        int v_q = bd_loop_before[(j_idx + bd_loop_before.size() - offset) %
-                                 bd_loop_before.size()];
-
-        auto in_same_triangle = [&](int v0, int v2, int v3) {
-          for (int i = 0; i < F_before.rows(); i++) {
-            if ((F_before(i, 0) == v0 || F_before(i, 1) == v0 ||
-                 F_before(i, 2) == v0) &&
-                (F_before(i, 0) == v2 || F_before(i, 1) == v2 ||
-                 F_before(i, 2) == v2) &&
-                (F_before(i, 0) == v3 || F_before(i, 1) == v3 ||
-                 F_before(i, 2) == v3)) {
-              return true;
-            }
-          }
-          return false;
-        };
-
-        b_soft.resize(3);
-
-        if (in_same_triangle(vi_before, vj_before, v_q)) {
-          v_to_keep = vj_before;
-          // keep vj means vp, vi, vj colinear
-          b_soft << v_p, vi_before, vj_before;
-          b_hard.resize(3);
-          b_hard[0] = std::make_pair(v_p, 0);
-          b_hard[1] = std::make_pair(vi_before, 0);
-          b_hard[2] = std::make_pair(vj_before, 0);
-        } else {
-          v_to_keep = vi_before;
-          // keep vi means vp, vi, vq colinear
-          b_soft << vi_before, vj_before, v_q;
-          b_hard.resize(3);
-          b_hard[0] = std::make_pair(vi_before, 0);
-          b_hard[1] = std::make_pair(vj_before, 0);
-          b_hard[2] = std::make_pair(v_q, 0);
-        }
+      int i_idx = std::distance(
+          bd_loop_before.begin(),
+          std::find(bd_loop_before.begin(), bd_loop_before.end(), vi_before));
+      int j_idx = std::distance(
+          bd_loop_before.begin(),
+          std::find(bd_loop_before.begin(), bd_loop_before.end(), vj_before));
+      int offset = 1;
+      if (bd_loop_before[i_idx + offset] == vj_before) {
+        offset = -1;
       }
+      // DEBUG CHECK
+      if (bd_loop_before[(i_idx + bd_loop_before.size() - offset) %
+                         bd_loop_before.size()] != vj_before) {
+        std::runtime_error(
+            "Something wrong with the boundary loop in 3-colinear method");
+      }
+      // vp, vi, vj, vq in order
+      int v_p = bd_loop_before[(i_idx + bd_loop_before.size() + offset) %
+                               bd_loop_before.size()];
+      int v_q = bd_loop_before[(j_idx + bd_loop_before.size() - offset) %
+                               bd_loop_before.size()];
+
+      auto in_same_triangle = [&](int v0, int v2, int v3) {
+        for (int i = 0; i < F_before.rows(); i++) {
+          if ((F_before(i, 0) == v0 || F_before(i, 1) == v0 ||
+               F_before(i, 2) == v0) &&
+              (F_before(i, 0) == v2 || F_before(i, 1) == v2 ||
+               F_before(i, 2) == v2) &&
+              (F_before(i, 0) == v3 || F_before(i, 1) == v3 ||
+               F_before(i, 2) == v3)) {
+            return true;
+          }
+        }
+        return false;
+      };
+
+      b_soft.resize(3);
+
+      if (in_same_triangle(vi_before, vj_before, v_q)) {
+        v_to_keep = vj_before;
+        // keep vj means vp, vi, vj colinear
+        b_soft << v_p, vi_before, vj_before;
+        b_hard.resize(3);
+        b_hard[0] = std::make_pair(v_p, 0);
+        b_hard[1] = std::make_pair(vi_before, 0);
+        b_hard[2] = std::make_pair(vj_before, 0);
+      } else {
+        v_to_keep = vi_before;
+        // keep vi means vp, vi, vq colinear
+        b_soft << vi_before, vj_before, v_q;
+        b_hard.resize(3);
+        b_hard[0] = std::make_pair(vi_before, 0);
+        b_hard[1] = std::make_pair(vj_before, 0);
+        b_hard[2] = std::make_pair(v_q, 0);
+      }
+    }
+
+    // TODO: implement this
+    // TODO: 3 colinear method or 5 colinear method?
+    if (do_3_colinear_case) {
 
       // for connector case there will be no more vertices than before case
       int N_v_joint = V_before.rows();
@@ -308,6 +308,27 @@ void get_joint_mesh(int case_id) {
       F_joint.bottomRows(F_joint_after.rows()) = F_joint_after;
 
     } else {
+      int N_v_joint = V_before.rows() + 1;
+
+      // build V_joint_before, and V_joint_after
+      V_joint_before = V_before;
+      V_joint_before.conservativeResize(N_v_joint, V_before.cols());
+      V_joint_before.row(V_before.rows()) = V_after.row(vi_after);
+      V_joint_after = V_joint_before;
+
+      // joint the two meshes
+      // get F_joint,(first after, then before)
+      F_joint_before = F_before;
+      F_joint_after.resize(F_after.rows(), F_after.cols());
+      // build F_joint_after
+      {
+        local_vid_after_to_before_map[vi_after] = N_v_joint - 1;
+        for (int i = 0; i < F_joint_after.rows(); i++) {
+          for (int j = 0; j < F_joint_after.cols(); j++) {
+            F_joint_after(i, j) = local_vid_after_to_before_map[F_after(i, j)];
+          }
+        }
+      }
       std::runtime_error("4-Colinear-Method is Not implemented yet");
     }
   } // case 2
