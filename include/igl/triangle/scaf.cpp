@@ -359,7 +359,8 @@ compute_energy_from_jacobians(const Eigen::MatrixXd &Ji,
   double energy = 0;
   if (energy_type == igl::MappingEnergyType::SYMMETRIC_DIRICHLET)
     energy = -4 * areas.sum(); // comply with paper description
-  return energy + igl::mapping_energy_with_jacobians(Ji, areas, energy_type, 0);
+  return fmax(0, energy + igl::mapping_energy_with_jacobians(Ji, areas,
+                                                             energy_type, 0));
 }
 
 IGL_INLINE double compute_soft_constraint_energy(const SCAFData &s) {
@@ -452,7 +453,6 @@ IGL_INLINE void build_surface_linear_system(const SCAFData &s,
   const VectorXi &bnd_ids = s.fixed_ids;
   auto bnd_n = bnd_ids.size();
   if (bnd_n == 0) {
-
     Eigen::SparseMatrix<double> At = A.transpose();
     At.makeCompressed();
 
@@ -814,6 +814,9 @@ IGL_INLINE Eigen::MatrixXd igl::triangle::scaf_solve(igl::triangle::SCAFData &s,
 
     s.energy =
         igl::triangle::scaf::compute_energy(s, s.w_uv, false) / s.mesh_measure;
+
+    if (s.energy < 1e-10)
+      break; // early stop
   }
 
   return s.w_uv.topRows(s.mv_num);
